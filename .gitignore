@@ -1,0 +1,15 @@
+# Node modules
+backend/node_modules/
+my-app/node_modules/
+
+# Environment files
+*.env
+
+# Build / cache
+backend/dist/
+my-app/.next/
+my-app/build/
+
+# System files
+.DS_Store
+Thumbs.db
