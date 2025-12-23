@@ -383,7 +383,6 @@ export const getUser = async (req: Request, res: Response) => {
                 id: true,
                 name: true,
                 slug: true,
-                logo: true
               }
             }
           }

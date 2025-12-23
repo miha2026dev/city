@@ -239,7 +239,7 @@ export const adController = {
       const ad = await prisma.ad.findUnique({
         where: { id },
         include: {
-          business: { select: { id: true, name: true, logo: true } },
+          business: { select: { id: true, name: true } },
         },
       });
 

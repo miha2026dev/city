@@ -779,8 +779,7 @@ export const checkUserBusiness = async (req: Request, res: Response) => {
         name: true,
         slug: true,
         status: true,
-        createdAt: true,
-        logo: true
+        createdAt: true
       }
     });
 

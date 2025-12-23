@@ -184,7 +184,6 @@ export const getCategory = async (req: Request, res: Response): Promise<void> =>
             id: true,
             name: true,
             slug: true,
-            logo: true,
             status: true,
             _count: {
               select: {
