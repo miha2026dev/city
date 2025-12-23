@@ -1,6 +1,0 @@
-{
-  "devDependencies": {
-    "@types/cookie-parser": "^1.4.10",
-    "@types/multer": "^2.0.0"
-  }
-}
