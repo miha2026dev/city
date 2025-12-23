@@ -1,7 +1,13 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { deleteFromCloudinary, uploadToCloudinary } from "../../utils/uploadToCloudinary";
-
+declare global {
+  namespace Express {
+    interface Request {
+      files?: Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] };
+    }
+  }
+}
 const prisma = new PrismaClient();
 
 // Interface للمستخدم المصادق عليه
@@ -433,7 +439,7 @@ export const updateBusiness = async (req: Request, res: Response) => {
         removedImages = [removedImages];
       }
       
-      const imageIds = removedImages.map((id: string) => parseInt(id)).filter(id => !isNaN(id));
+      const imageIds = removedImages.map((id: string |number) => parseInt(id as string)).filter((id: number) => !isNaN(id));
       
       if (imageIds.length > 0) {
         // جلب معلومات الصور لحذفها من Cloudinary

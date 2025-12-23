@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { PrismaClient, UserRole } from "@prisma/client";
+import { PrismaClient, Role } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 interface AuthenticatedRequest extends Request {
   user?: {
     id: number;
-    role: UserRole;
+    role: Role;
     [key: string]: any;
   };
 }
@@ -66,7 +66,7 @@ export const adminCreateUser = async (req: Request, res: Response) => {
         password: hashedPassword, 
         name: name.trim(), 
         phone: phone?.trim() || null, 
-        role: role as UserRole 
+        role: role as Role 
       },
     });
 
@@ -503,7 +503,7 @@ export const updateUser = async (req: Request, res: Response) => {
     if (name !== undefined) updateData.name = name.trim();
     if (phone !== undefined) updateData.phone = phone?.trim() || null;
     if (username !== undefined) updateData.username = username.trim();
-    if (role !== undefined) updateData.role = role as UserRole;
+    if (role !== undefined) updateData.role = role as Role;
     
     // تحديث كلمة المرور إذا تم إرسالها
     if (password && password.length >= 6) {

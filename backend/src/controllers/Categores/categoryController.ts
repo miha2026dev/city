@@ -252,7 +252,8 @@ export const updateCategory = async (req: Request, res: Response): Promise<void>
       });
       return;
     }
-
+    
+    
     // إذا تغير الاسم، عدل الـ slug
     let slug = existingCategory.slug;
     if (name && name.trim() !== existingCategory.name) {
@@ -299,8 +300,8 @@ export const updateCategory = async (req: Request, res: Response): Promise<void>
     }
 
     // التحقق من وجود دورة (أي تصنيف يجعله ابناً لأحد أبنائه)
-    if (parsedParentId) {
-      let currentParentId = parsedParentId;
+    if (parsedParentId !== null) {
+      let currentParentId :number  = parsedParentId as number;
       while (currentParentId) {
         if (currentParentId === categoryId) {
           res.status(400).json({
@@ -315,7 +316,7 @@ export const updateCategory = async (req: Request, res: Response): Promise<void>
           select: { parentId: true }
         });
         
-        currentParentId = parent?.parentId || null;
+        currentParentId = parent?.parentId || 0;
       }
     }
 

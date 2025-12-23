@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { PrismaClient, AdTargetType, BannerType, AdStatus } from "@prisma/client";
 import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/uploadToCloudinary";
 
+
 const prisma = new PrismaClient();
 const ALLOWED_SORT_FIELDS = ["createdAt", "priority", "clicks", "impressions"] as const;
 
@@ -39,11 +40,13 @@ interface CreateAdData {
 }
 
 export const adController = {
+  
   /* ======================================================
      CREATE AD
   ====================================================== */
   async createAd(req: Request, res: Response) {
     try {
+      
       const user = (req as AuthenticatedRequest).user;
       const data = req.body as CreateAdData;
       
@@ -51,9 +54,13 @@ export const adController = {
         return res.status(403).json({ message: "غير مصرح" });
       }
 
-      const startAt = data.startAt ? new Date(data.startAt) : null;
-      const endAt = data.endAt ? new Date(data.endAt) : null;
-
+      const startAt = new Date(data.startAt as string);
+      const endAt = new Date(data.endAt as string);
+      if (!data.startAt || !data.endAt) {
+      return res.status(400).json({ 
+        message: "تاريخ البداية والنهاية مطلوبان" 
+      });
+      }
       // ========== التحقق بناءً على الدور ==========
       if (user.role === "ADMIN") {
         // المدير يمكنه إنشاء إعلانات SYSTEM فقط
@@ -62,7 +69,7 @@ export const adController = {
             message: "المدير يمكنه إنشاء إعلانات نظامية فقط"
           });
         }
-        data.targetId = null; // لا يوجد متجر
+        data.targetId = undefined; // لا يوجد متجر
       }
 
       if (user.role === "OWNER") {
@@ -133,8 +140,8 @@ export const adController = {
           targetType: data.targetType,
           targetId: user.role === "OWNER" ? Number(data.targetId) : null,
           url: data.url || null,
-          startAt,
-          endAt,
+          startAt: startAt ,
+          endAt:endAt ,
           status: "PENDING_REVIEW" as AdStatus,
           isActive: false,
           priority: 0,
