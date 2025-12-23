@@ -1,64 +1,98 @@
 import { Request, Response } from "express";
-import { PrismaClient, AdTargetType, BannerType } from "@prisma/client";
+import { PrismaClient, AdTargetType, BannerType, AdStatus } from "@prisma/client";
 import { uploadToCloudinary, deleteFromCloudinary } from "../../utils/uploadToCloudinary";
-import { validateAdInput } from "../../middlewares/validateRequest";
-import { ok } from "assert";
-
 
 const prisma = new PrismaClient();
-const ALLOWED_SORT_FIELDS = ["createdAt", "priority", "clicks", "impressions"];
+const ALLOWED_SORT_FIELDS = ["createdAt", "priority", "clicks", "impressions"] as const;
+
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: number;
+    role: string;
+    [key: string]: any;
+  };
+}
+
+interface QueryParams {
+  page?: string;
+  limit?: string;
+  status?: AdStatus;
+  bannerType?: BannerType;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+interface CreateAdData {
+  title: string;
+  content?: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  bannerType?: BannerType;
+  targetType: AdTargetType;
+  targetId?: string | number;
+  url?: string;
+  startAt?: string;
+  endAt?: string;
+}
 
 export const adController = {
   /* ======================================================
      CREATE AD
   ====================================================== */
- async createAd(req: Request, res: Response) {
-  try {
-    const user = (req as any).user;
-    const data = req.body;
-    const startAt = data.startAt ? new Date(data.startAt) : null;
-    const endAt   = data.endAt ? new Date(data.endAt) : null; 
-     const businessId = Number(data.targetId);
-    if (!["ADMIN", "OWNER"].includes(user.role)) {
-      return res.status(403).json({ message: "غير مصرح" });
-    }
-
-    // ========== التحقق بناءً على الدور ==========
-    
-    if (user.role === "ADMIN") {
-      // المدير يمكنه إنشاء إعلانات SYSTEM فقط
-      if (data.targetType !== "EXTERNAL") {
-        return res.status(400).json({ 
-          message: "المدير يمكنه إنشاء إعلانات نظامية فقط" 
-        });
-      }
-      data.targetId = null; // لا يوجد متجر
-    }
-    
-    if (user.role === "OWNER") {
-      // صاحب العمل يمكنه إنشاء إعلانات BUSINESS فقط
-      if (data.targetType !== "BUSINESS") {
-        return res.status(400).json({ 
-          message: "صاحب العمل يمكنه إنشاء إعلانات لمتجره فقط" 
-        });
-      }
+  async createAd(req: Request, res: Response) {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const data = req.body as CreateAdData;
       
-      // التحقق من أن المتجر يخصه
-     
-      const business = await prisma.business.findUnique({
-        where: { id: businessId },
-      });
-
-      if (!business) {
-        return res.status(404).json({ message: "المتجر غير موجود" });
+      if (!user || !["ADMIN", "OWNER"].includes(user.role)) {
+        return res.status(403).json({ message: "غير مصرح" });
       }
 
-      if (business.ownerId !== user.id) {
-        return res.status(403).json({ 
-          message: "لا يمكنك الإعلان لمتجر لا تملكه" 
+      const startAt = data.startAt ? new Date(data.startAt) : null;
+      const endAt = data.endAt ? new Date(data.endAt) : null;
+
+      // ========== التحقق بناءً على الدور ==========
+      if (user.role === "ADMIN") {
+        // المدير يمكنه إنشاء إعلانات SYSTEM فقط
+        if (data.targetType !== "EXTERNAL") {
+          return res.status(400).json({
+            message: "المدير يمكنه إنشاء إعلانات نظامية فقط"
+          });
+        }
+        data.targetId = null; // لا يوجد متجر
+      }
+
+      if (user.role === "OWNER") {
+        // صاحب العمل يمكنه إنشاء إعلانات BUSINESS فقط
+        if (data.targetType !== "BUSINESS") {
+          return res.status(400).json({
+            message: "صاحب العمل يمكنه إنشاء إعلانات لمتجره فقط"
+          });
+        }
+
+        // التحقق من أن المتجر يخصه
+        const businessId = Number(data.targetId);
+        if (!businessId || isNaN(businessId)) {
+          return res.status(400).json({ message: "معرف المتجر غير صالح" });
+        }
+
+        const business = await prisma.business.findUnique({
+          where: { id: businessId },
         });
+
+        if (!business) {
+          return res.status(404).json({ message: "المتجر غير موجود" });
+        }
+
+        if (business.ownerId !== user.id) {
+          return res.status(403).json({
+            message: "لا يمكنك الإعلان لمتجر لا تملكه"
+          });
+        }
       }
-    }
 
       // رفع الصور مرة واحدة فقط
       let imageUrl: string | undefined;
@@ -67,7 +101,7 @@ export const adController = {
 
       const files = req.files as {
         [fieldname: string]: Express.Multer.File[];
-      };
+      } | undefined;
 
       if (files?.image?.[0]) {
         imageUrl = (await uploadToCloudinary(files.image[0])).secure_url;
@@ -79,24 +113,29 @@ export const adController = {
         tabletImageUrl = (await uploadToCloudinary(files.tabletImage[0])).secure_url;
       }
 
+      // التحقق من الحقول المطلوبة
+      if (!data.title) {
+        return res.status(400).json({ message: "العنوان مطلوب" });
+      }
+
       const ad = await prisma.ad.create({
         data: {
           title: data.title,
-          content: data.content,
-          imageUrl,
-          mobileImageUrl,
-          tabletImageUrl,
-          ctaText: data.ctaText,
-          ctaUrl: data.ctaUrl,
-          backgroundColor: data.backgroundColor,
-          textColor: data.textColor,
-          bannerType: data.bannerType ?? BannerType.MAIN_HERO,
+          content: data.content || null,
+          imageUrl: imageUrl || null,
+          mobileImageUrl: mobileImageUrl || null,
+          tabletImageUrl: tabletImageUrl || null,
+          ctaText: data.ctaText || null,
+          ctaUrl: data.ctaUrl || null,
+          backgroundColor: data.backgroundColor || null,
+          textColor: data.textColor || null,
+          bannerType: data.bannerType || BannerType.MAIN_HERO,
           targetType: data.targetType,
-          targetId: businessId,
-          url: data.url,
+          targetId: user.role === "OWNER" ? Number(data.targetId) : null,
+          url: data.url || null,
           startAt,
           endAt,
-          status: "PENDING_REVIEW",
+          status: "PENDING_REVIEW" as AdStatus,
           isActive: false,
           priority: 0,
         },
@@ -104,33 +143,32 @@ export const adController = {
 
       res.status(201).json({ message: "تم إنشاء الإعلان", ad });
     } catch (err: any) {
-      console.error(err);
+      console.error("Error in createAd:", err);
       res.status(500).json({ message: "خطأ داخلي", error: err.message });
     }
   },
-
 
   /* ======================================================
      GET ALL ADS (ADMIN / OWNER)
   ====================================================== */
   async getAllAds(req: Request, res: Response) {
     try {
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const {
-        page = 1,
-        limit = 20,
+        page = "1",
+        limit = "20",
         status,
         bannerType,
         search,
         sortBy = "createdAt",
         sortOrder = "desc",
-      } = req.query as any;
+      } = req.query as QueryParams;
 
-      if (!["ADMIN", "OWNER"].includes(user.role)) {
+      if (!user || !["ADMIN", "OWNER"].includes(user.role)) {
         return res.status(403).json({ message: "غير مصرح" });
       }
 
-      if (!ALLOWED_SORT_FIELDS.includes(sortBy)) {
+      if (!ALLOWED_SORT_FIELDS.includes(sortBy as any)) {
         return res.status(400).json({ message: "حقل الترتيب غير مسموح" });
       }
 
@@ -141,8 +179,8 @@ export const adController = {
 
       if (search) {
         where.OR = [
-          { title: { contains: search, mode: "insensitive" } },
-          { content: { contains: search, mode: "insensitive" } },
+          { title: { contains: search, mode: "insensitive" as const } },
+          { content: { contains: search, mode: "insensitive" as const } },
         ];
       }
 
@@ -150,13 +188,13 @@ export const adController = {
         where.business = { ownerId: user.id };
       }
 
-      const skip = (Number(page) - 1) * Number(limit);
+      const skip = (parseInt(page) - 1) * parseInt(limit);
 
       const [ads, total] = await prisma.$transaction([
         prisma.ad.findMany({
           where,
           skip,
-          take: Number(limit),
+          take: parseInt(limit),
           orderBy: { [sortBy]: sortOrder },
           include: {
             business: { select: { id: true, name: true } },
@@ -169,12 +207,12 @@ export const adController = {
         ads,
         pagination: {
           total,
-          page: Number(page),
-          pages: Math.ceil(total / Number(limit)),
+          page: parseInt(page),
+          pages: Math.ceil(total / parseInt(limit)),
         },
       });
     } catch (err: any) {
-      console.error(err);
+      console.error("Error in getAllAds:", err);
       res.status(500).json({ message: "خطأ داخلي" });
     }
   },
@@ -182,220 +220,254 @@ export const adController = {
   /* ======================================================
    GET AD BY ID
 ====================================================== */
-async getAdById(req: Request, res: Response) {
-  try {
-    const user = (req as any).user;
-    const id = Number(req.params.id);
+  async getAdById(req: Request, res: Response) {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const id = parseInt(req.params.id);
 
-    const ad = await prisma.ad.findUnique({
-      where: { id },
-      include: {
-        business: { select: { id: true, name: true, logo: true } },
-      },
-    });
-
-    if (!ad) {
-      return res.status(404).json({ message: "الإعلان غير موجود" });
-    }
-
-    // تحقق من الصلاحية للمالك
-    if (user.role === "OWNER") {
-      if (ad.targetType !== "BUSINESS" || !ad.targetId) {
-        return res.status(403).json({ message: "غير مصرح" });
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف الإعلان غير صالح" });
       }
-      
-      const business = await prisma.business.findUnique({
-        where: { id: ad.targetId },
+
+      const ad = await prisma.ad.findUnique({
+        where: { id },
+        include: {
+          business: { select: { id: true, name: true, logo: true } },
+        },
       });
-      
-      if (!business || business.ownerId !== user.id) {
-        return res.status(403).json({ message: "غير مصرح" });
+
+      if (!ad) {
+        return res.status(404).json({ message: "الإعلان غير موجود" });
       }
+
+      // تحقق من الصلاحية للمالك
+      if (user?.role === "OWNER") {
+        if (ad.targetType !== "BUSINESS" || !ad.targetId) {
+          return res.status(403).json({ message: "غير مصرح" });
+        }
+
+        const business = await prisma.business.findUnique({
+          where: { id: ad.targetId },
+        });
+
+        if (!business || business.ownerId !== user.id) {
+          return res.status(403).json({ message: "غير مصرح" });
+        }
+      }
+
+      res.json({ ad });
+    } catch (err: any) {
+      console.error("Error in getAdById:", err);
+      res.status(500).json({ message: "خطأ داخلي" });
     }
-
-    res.json({ ad });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي" });
-  }
-},
-
+  },
 
   /* ======================================================
-     UPDATE AD
+     UPDATE AD STATUS
   ====================================================== */
   async updateAdStatus(req: Request, res: Response) {
-  try {
-    const user = (req as any).user;
-    const id = Number(req.params.id);
-    const { status, rejectionReason } = req.body;
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const id = parseInt(req.params.id);
+      const { status, rejectionReason } = req.body as {
+        status: AdStatus;
+        rejectionReason?: string;
+      };
 
-    // للادمن فقط
-    if (user.role !== "ADMIN") {
-      return res.status(403).json({ message: "غير مصرح" });
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف الإعلان غير صالح" });
+      }
+
+      // للادمن فقط
+      if (!user || user.role !== "ADMIN") {
+        return res.status(403).json({ message: "غير مصرح" });
+      }
+
+      const validStatuses: AdStatus[] = ["APPROVED", "REJECTED", "PENDING_REVIEW"];
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({ message: "حالة غير صالحة" });
+      }
+
+      const ad = await prisma.ad.findUnique({ where: { id } });
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+
+      const updateData: any = { status };
+      if (status === "REJECTED" && rejectionReason) {
+        updateData.rejectionReason = rejectionReason;
+      }
+      if (status === "APPROVED") {
+        updateData.isActive = true;
+      }
+
+      const updated = await prisma.ad.update({
+        where: { id },
+        data: updateData,
+      });
+
+      const statusMessage = status === "APPROVED" ? "الموافقة" :
+                          status === "REJECTED" ? "الرفض" :
+                          "تحديث الحالة";
+
+      res.json({ message: `تم ${statusMessage}`, ad: updated });
+    } catch (err: any) {
+      console.error("Error in updateAdStatus:", err);
+      res.status(500).json({ message: "خطأ داخلي" });
     }
+  },
 
-    if (!["APPROVED", "REJECTED", "PENDING_REVIEW"].includes(status)) {
-      return res.status(400).json({ message: "حالة غير صالحة" });
-    }
-
-    const ad = await prisma.ad.findUnique({ where: { id } });
-    if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
-
-    const updateData: any = { status };
-    if (status === "REJECTED" && rejectionReason) {
-      updateData.rejectionReason = rejectionReason;
-    }
-    if (status === "APPROVED") {
-      updateData.isActive = true;
-    }
-
-    const updated = await prisma.ad.update({
-      where: { id },
-      data: updateData,
-    });
-
-    res.json({ message: `تم ${status === "APPROVED" ? "الموافقة" : "الرفض"}`, ad: updated });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي" });
-  }
-},
-
-
-/* ======================================================
+  /* ======================================================
    INCREMENT CLICKS
 ====================================================== */
-async incrementClicks(req: Request, res: Response) {
-  try {
-    const id = Number(req.params.id);
+  async incrementClicks(req: Request, res: Response) {
+    try {
+      const id = parseInt(req.params.id);
 
-    await prisma.ad.update({
-      where: { id },
-      data: { clicks: { increment: 1 } },
-    });
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف الإعلان غير صالح" });
+      }
 
-    res.json({ message: "تم تحديث النقرات" });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي" });
-  }
-},
+      await prisma.ad.update({
+        where: { id },
+        data: { clicks: { increment: 1 } },
+      });
 
+      res.json({ message: "تم تحديث النقرات" });
+    } catch (err: any) {
+      console.error("Error in incrementClicks:", err);
+      res.status(500).json({ message: "خطأ داخلي" });
+    }
+  },
 
-/* ======================================================
+  /* ======================================================
    GET ADS BY BUSINESS (OWNER)
 ====================================================== */
-async getMyAds(req: Request, res: Response) {
-  try {
-    const user = (req as any).user;
-    const { page = 1, limit = 20, status } = req.query as any;
+  async getMyAds(req: Request, res: Response) {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const { page = "1", limit = "20", status } = req.query as {
+        page?: string;
+        limit?: string;
+        status?: AdStatus;
+      };
 
-    if (user.role !== "OWNER") {
-      return res.status(403).json({ message: "غير مصرح" });
+      if (!user || user.role !== "OWNER") {
+        return res.status(403).json({ message: "غير مصرح" });
+      }
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const [ads, total] = await Promise.all([
+        prisma.ad.findMany({
+          where: {
+            targetType: "BUSINESS",
+            business: { ownerId: user.id },
+            ...(status && { status }),
+          },
+          skip,
+          take: parseInt(limit),
+          orderBy: { createdAt: "desc" },
+          include: {
+            business: { select: { id: true, name: true } },
+          },
+        }),
+        prisma.ad.count({
+          where: {
+            targetType: "BUSINESS",
+            business: { ownerId: user.id },
+            ...(status && { status }),
+          },
+        }),
+      ]);
+
+      res.json({
+        ads,
+        pagination: {
+          total,
+          page: parseInt(page),
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      });
+    } catch (err: any) {
+      console.error("Error in getMyAds:", err);
+      res.status(500).json({ message: "خطأ داخلي" });
     }
+  },
 
-    const skip = (Number(page) - 1) * Number(limit);
-
-    const [ads, total] = await Promise.all([
-      prisma.ad.findMany({
-        where: {
-          targetType: "BUSINESS",
-          business: { ownerId: user.id },
-          ...(status && { status }),
-        },
-        skip,
-        take: Number(limit),
-        orderBy: { createdAt: "desc" },
-        include: {
-          business: { select: { id: true, name: true } },
-        },
-      }),
-      prisma.ad.count({
-        where: {
-          targetType: "BUSINESS",
-          business: { ownerId: user.id },
-          ...(status && { status }),
-        },
-      }),
-    ]);
- 
-    res.json({
-      ads,
-      pagination: {
-        total,
-        page: Number(page),
-        pages: Math.ceil(total / Number(limit)),
-      },
-    });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي" });
-  }
-},
-
-
-/* ======================================================
+  /* ======================================================
    GET ACTIVE ADS BY BANNER TYPE
 ====================================================== */
-async getAdsByType(req: Request, res: Response) {
-  try {
-    const { type } = req.params;
-    const now = new Date();
+  async getAdsByType(req: Request, res: Response) {
+    try {
+      const { type } = req.params;
+      const now = new Date();
 
-    if (!Object.values(BannerType).includes(type as BannerType)) {
-      return res.status(400).json({ message: "نوع البانر غير صالح" });
+      // التحقق من صحة النوع
+      const validTypes = Object.values(BannerType);
+      if (!type || !validTypes.includes(type as BannerType)) {
+        return res.status(400).json({ message: "نوع البانر غير صالح" });
+      }
+
+      const ads = await prisma.ad.findMany({
+        where: {
+          bannerType: type as BannerType,
+          isActive: true,
+          status: "APPROVED",
+          startAt: { lte: now },
+          endAt: { gte: now },
+        },
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+        take: 5,
+      });
+
+      // تحديث الـimpressions بشكل غير متزامن بدون انتظار
+      if (ads.length > 0) {
+        const updatePromises = ads.map(ad =>
+          prisma.ad.update({
+            where: { id: ad.id },
+            data: { impressions: { increment: 1 } },
+          })
+        );
+        Promise.all(updatePromises).catch(console.error); // لا نعيق الاستجابة
+      }
+
+      res.json({ ads });
+    } catch (err: any) {
+      console.error("Error in getAdsByType:", err);
+      res.status(500).json({ message: "خطأ داخلي" });
     }
-
-    const ads = await prisma.ad.findMany({
-      where: {
-        bannerType: type as BannerType,
-        isActive: true,
-        status: "APPROVED",
-        startAt: { lte: now },
-        endAt: { gte: now },
-      },
-      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-      take: 5,
-    });
-
-    // تحديث الـimpressions بشكل غير متزامن بدون انتظار
-    if (ads.length > 0) {
-      const updatePromises = ads.map(ad =>
-        prisma.ad.update({
-          where: { id: ad.id },
-          data: { impressions: { increment: 1 } },
-        })
-      );
-      Promise.all(updatePromises).catch(console.error); // لا نعيق الاستجابة
-    }
-
-    res.json({ ads });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي" });
-  }
-},
+  },
 
   /* ======================================================
      DELETE AD
   ====================================================== */
   async deleteAd(req: Request, res: Response) {
     try {
-      const user = (req as any).user;
-      const id = Number(req.params.id);
+      const user = (req as AuthenticatedRequest).user;
+      const id = parseInt(req.params.id);
+
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف الإعلان غير صالح" });
+      }
 
       const ad = await prisma.ad.findUnique({ where: { id } });
       if (!ad) return res.status(404).json({ message: "غير موجود" });
 
-      if (user.role !== "ADMIN") {
+      if (!user || user.role !== "ADMIN") {
         return res.status(403).json({ message: "للمدير فقط" });
       }
 
+      // حذف الصور من Cloudinary إذا كانت موجودة
+      const deletePromises = [];
+      if (ad.imageUrl) deletePromises.push(deleteFromCloudinary(ad.imageUrl));
+      if (ad.mobileImageUrl) deletePromises.push(deleteFromCloudinary(ad.mobileImageUrl));
+      if (ad.tabletImageUrl) deletePromises.push(deleteFromCloudinary(ad.tabletImageUrl));
+
+      await Promise.all(deletePromises);
       await prisma.ad.delete({ where: { id } });
+      
       res.json({ message: "تم الحذف" });
     } catch (err: any) {
-      console.error(err);
+      console.error("Error in deleteAd:", err);
       res.status(500).json({ message: "خطأ داخلي" });
     }
   },
@@ -403,80 +475,92 @@ async getAdsByType(req: Request, res: Response) {
   /* ======================================================
    UPDATE AD (FULL UPDATE)
 ====================================================== */
-async updateAd(req: Request, res: Response) {
-  try {
-    const user = (req as any).user;
-    const id = Number(req.params.id);
-    const data = req.body;
+  async updateAd(req: Request, res: Response) {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const id = parseInt(req.params.id);
+      const data = req.body as any;
 
-    const ad = await prisma.ad.findUnique({ where: { id } });
-    if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
-
-    // تحقق من الصلاحيات
-    if (user.role === "OWNER") {
-      if (ad.targetType !== "BUSINESS" || !ad.targetId) {
-        return res.status(403).json({ message: "غير مصرح" });
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف الإعلان غير صالح" });
       }
+
+      const ad = await prisma.ad.findUnique({ where: { id } });
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+
+      // تحقق من الصلاحيات
+      if (user?.role === "OWNER") {
+        if (ad.targetType !== "BUSINESS" || !ad.targetId) {
+          return res.status(403).json({ message: "غير مصرح" });
+        }
+
+        const business = await prisma.business.findUnique({
+          where: { id: ad.targetId }
+        });
+
+        if (!business || business.ownerId !== user.id) {
+          return res.status(403).json({ message: "غير مصرح" });
+        }
+
+        // المالك لا يمكنه تغيير بعض الحقول
+        delete data.status;
+        delete data.priority;
+        delete data.isActive;
+        delete data.targetType;
+        delete data.targetId;
+      }
+
+      // معالجة التواريخ
+      if (data.startAt) data.startAt = new Date(data.startAt);
+      if (data.endAt) data.endAt = new Date(data.endAt);
+
+      // التحقق من صحة التواريخ
+      if (data.startAt && data.endAt && data.endAt <= data.startAt) {
+        return res.status(400).json({
+          message: "تاريخ الانتهاء يجب أن يكون بعد تاريخ البداية"
+        });
+      }
+
+      // معالجة الصور
+      const updateData: any = { ...data };
       
-      const business = await prisma.business.findUnique({ 
-        where: { id: ad.targetId } 
+      if (req.files) {
+        const files = req.files as any;
+
+        // معالجة كل صورة على حدة
+        if (files.image?.[0]) {
+          if (ad.imageUrl) {
+            await deleteFromCloudinary(ad.imageUrl);
+          }
+          updateData.imageUrl = (await uploadToCloudinary(files.image[0])).secure_url;
+        }
+
+        if (files.mobileImage?.[0]) {
+          if (ad.mobileImageUrl) {
+            await deleteFromCloudinary(ad.mobileImageUrl);
+          }
+          updateData.mobileImageUrl = (await uploadToCloudinary(files.mobileImage[0])).secure_url;
+        }
+
+        if (files.tabletImage?.[0]) {
+          if (ad.tabletImageUrl) {
+            await deleteFromCloudinary(ad.tabletImageUrl);
+          }
+          updateData.tabletImageUrl = (await uploadToCloudinary(files.tabletImage[0])).secure_url;
+        }
+      }
+
+      const updated = await prisma.ad.update({
+        where: { id },
+        data: updateData,
       });
-      
-      if (!business || business.ownerId !== user.id) {
-        return res.status(403).json({ message: "غير مصرح" });
-      }
-      
-      // المالك لا يمكنه تغيير بعض الحقول
-      delete data.status;
-      delete data.priority;
-      delete data.isActive;
+
+      res.json({ message: "تم تحديث الإعلان بنجاح", ad: updated });
+    } catch (err: any) {
+      console.error("Error in updateAd:", err);
+      res.status(500).json({ message: "خطأ داخلي", error: err.message });
     }
-
-    // معالجة التواريخ
-    if (data.startAt) data.startAt = new Date(data.startAt);
-    if (data.endAt) data.endAt = new Date(data.endAt);
-    
-    // التحقق من صحة التواريخ
-    if (data.startAt && data.endAt && data.endAt <= data.startAt) {
-      return res.status(400).json({ 
-        message: "تاريخ الانتهاء يجب أن يكون بعد تاريخ البداية" 
-      });
-    }
-
-    // معالجة الصور
-    if (req.files) {
-      const files = req.files as any;
-      
-      // حذف الصور القديمة من Cloudinary (إذا كانت موجودة)
-      const deletePromises = [];
-      if (files.image && ad.imageUrl) {
-        deletePromises.push(deleteFromCloudinary(ad.imageUrl));
-        data.imageUrl = (await uploadToCloudinary(files.image[0].path, "ads")).secure_url;
-      }
-      if (files.mobileImage && ad.mobileImageUrl) {
-        deletePromises.push(deleteFromCloudinary(ad.mobileImageUrl));
-        data.mobileImageUrl = (await uploadToCloudinary(files.mobileImage[0].path, "ads/mobile")).secure_url;
-      }
-      if (files.tabletImage && ad.tabletImageUrl) {
-        deletePromises.push(deleteFromCloudinary(ad.tabletImageUrl));
-        data.tabletImageUrl = (await uploadToCloudinary(files.tabletImage[0].path, "ads/tablet")).secure_url;
-      }
-      
-      // تنفيذ الحذف بشكل غير متزامن
-      Promise.all(deletePromises).catch(console.error);
-    }
-
-    const updated = await prisma.ad.update({
-      where: { id },
-      data,
-    });
-
-    res.json({ message: "تم تحديث الإعلان بنجاح", ad: updated });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "خطأ داخلي", error: err.message });
-  }
-},
+  },
 
   /* ======================================================
      PUBLIC ADS
@@ -488,7 +572,7 @@ async updateAd(req: Request, res: Response) {
       const ads = await prisma.ad.findMany({
         where: {
           isActive: true,
-          status: "APPROVED", // ✅ string literal
+          status: "APPROVED",
           startAt: { lte: now },
           endAt: { gte: now },
         },
@@ -496,14 +580,17 @@ async updateAd(req: Request, res: Response) {
         take: 10,
       });
 
-      await prisma.ad.updateMany({
-        where: { id: { in: ads.map(a => a.id) } },
-        data: { impressions: { increment: 1 } },
-      });
+      // تحديث الـimpressions
+      if (ads.length > 0) {
+        await prisma.ad.updateMany({
+          where: { id: { in: ads.map(a => a.id) } },
+          data: { impressions: { increment: 1 } },
+        });
+      }
 
       res.json({ ads });
     } catch (err: any) {
-      console.error(err);
+      console.error("Error in getPublicAds:", err);
       res.status(500).json({ message: "خطأ داخلي" });
     }
   },

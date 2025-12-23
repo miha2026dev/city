@@ -1,19 +1,33 @@
-
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
-import { ok } from "assert";
 import { deleteFromCloudinary, uploadToCloudinary } from "../../utils/uploadToCloudinary";
 
 const prisma = new PrismaClient();
 
+// Interface للمستخدم المصادق عليه
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: number;
+    role: string;
+    [key: string]: any;
+  };
+}
+
 /* ============================
    CREATE BUSINESS (OWNER ONLY)
 ============================ */
-
-
 export const createBusiness = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id; // ⬅️ استخدم الـ id من middleware
+    const user = (req as AuthenticatedRequest).user;
+    
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        message: "يجب تسجيل الدخول أولاً"
+      });
+    }
+
+    const userId = user.id;
     const {
       name,
       categoryId,
@@ -42,10 +56,10 @@ export const createBusiness = async (req: Request, res: Response) => {
     }
 
     // 2. التحقق من البيانات المطلوبة
-    if (!name) {
+    if (!name || name.trim().length < 2) {
       return res.status(400).json({
         ok: false,
-        message: "اسم العمل مطلوب",
+        message: "اسم العمل مطلوب (على الأقل حرفين)",
       });
     }
 
@@ -63,50 +77,84 @@ export const createBusiness = async (req: Request, res: Response) => {
 
     // تحقق من أن slug فريد
     const slugExists = await prisma.business.findUnique({ where: { slug } });
-    if (slugExists) slug = `${slug}-${Date.now()}`;
+    if (slugExists) {
+      const timestamp = Date.now().toString().slice(-6);
+      slug = `${slug}-${timestamp}`;
+    }
+
+    // تحويل categoryId إلى رقم
+    const parsedCategoryId = categoryId ? parseInt(categoryId) : null;
+    if (parsedCategoryId && isNaN(parsedCategoryId)) {
+      return res.status(400).json({
+        ok: false,
+        message: "معرف التصنيف غير صالح"
+      });
+    }
+
+    // تحويل openingHours من JSON string إلى object
+    let parsedOpeningHours = {};
+    if (openingHours) {
+      try {
+        parsedOpeningHours = typeof openingHours === "string" 
+          ? JSON.parse(openingHours) 
+          : openingHours;
+      } catch (error) {
+        console.warn("خطأ في تحليل openingHours، سيتم استخدام object فارغ");
+      }
+    }
 
     // 4. إنشاء العمل
     const business = await prisma.business.create({
       data: {
-        ownerId: userId, // ⬅️ استخدم userId من middleware
-        name,
+        ownerId: userId,
+        name: name.trim(),
         slug,
-        description: description || null,
-        categoryId: categoryId ? parseInt(categoryId) : null,
-        tags: tags || "",
-        address: address || null,
-        city: city || null,
-        region: region || null,
-        phone: phone || null,
-        mobile: mobile || null,
-        website: website || null,
-        openingHours: openingHours
-          ? typeof openingHours === "string"
-            ? JSON.parse(openingHours)
-            : openingHours
-          : {},
-        status: "PENDING", // ⬅️ وضع افتراضي "قيد المراجعة"
+        description: description?.trim() || null,
+        categoryId: parsedCategoryId,
+        tags: tags?.trim() || "",
+        address: address?.trim() || null,
+        city: city?.trim() || null,
+        region: region?.trim() || null,
+        phone: phone?.trim() || null,
+        mobile: mobile?.trim() || null,
+        website: website?.trim() || null,
+        openingHours: parsedOpeningHours,
+        status: "PENDING",
       },
     });
 
     // 5. التعامل مع الصور
-    const files = req.files as Express.Multer.File[];
+    const files = req.files as Express.Multer.File[] | undefined;
     if (files && files.length > 0) {
-      const mediaData = files.map((file, index) => ({
-      url: `${req.protocol}://${req.get("host")}/uploads/${file.filename}`,
-        type: file.mimetype.startsWith("image") ? "IMAGE" : file.mimetype.startsWith("video") ? "VIDEO" : "DOCUMENT",
-        altText: `${name} - صورة ${index + 1}`,
-        title: `${name} - ${index + 1}`,
-        order: index,
-        businessId: business.id,
-        publicId: null,
-        description: null,
-      }));
+      const mediaPromises = files.map(async (file, index) => {
+        try {
+          // رفع الصورة إلى Cloudinary
+          const uploadResult = await uploadToCloudinary(file);
+          
+          return {
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
+            type: file.mimetype.startsWith("image") ? "IMAGE" : 
+                  file.mimetype.startsWith("video") ? "VIDEO" : "DOCUMENT",
+            altText: `${name} - صورة ${index + 1}`,
+            title: `${name} - ${index + 1}`,
+            order: index,
+            businessId: business.id,
+            description: null,
+          };
+        } catch (uploadError) {
+          console.error(`خطأ في رفع الصورة ${index + 1}:`, uploadError);
+          return null;
+        }
+      });
 
-      try {
-        await prisma.media.createMany({ data: mediaData, skipDuplicates: true });
-      } catch (err) {
-        console.error("خطأ أثناء حفظ الصور:", err);
+      const mediaData = (await Promise.all(mediaPromises)).filter(Boolean);
+      
+      if (mediaData.length > 0) {
+        await prisma.media.createMany({ 
+          data: mediaData as any[], 
+          skipDuplicates: true 
+        });
       }
     }
 
@@ -123,30 +171,55 @@ export const createBusiness = async (req: Request, res: Response) => {
     else if (error.code === "P2003") errorMessage = "المستخدم أو التصنيف غير موجود";
     else if (error.code === "P2025") errorMessage = "البيانات المرجعية غير موجودة";
 
-    res.status(500).json({ ok: false, message: errorMessage });
+    res.status(500).json({ 
+      ok: false, 
+      message: errorMessage,
+      ...(process.env.NODE_ENV === "development" && { error: error.message })
+    });
   }
 };
-
 
 /* ============================
    GET OWNER BUSINESSES
 ============================ */
 export const getOwnerBusinesses = async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
+
+  const userId = user.id;
 
   try {
-    // ⬇️ غيرت من findMany إلى findFirst لأن كل مستخدم له عمل واحد فقط
     const business = await prisma.business.findFirst({
       where: { ownerId: userId },
       include: {
-        category: true,
-        media: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true
+          }
+        },
+        media: {
+          orderBy: { order: 'asc' }
+        },
         reviews: {
           include: {
             user: {
-              select: { name: true, avatarUrl: true }
+              select: { 
+                id: true,
+                name: true, 
+                avatarUrl: true 
+              }
             }
-          }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10
         },
         _count: {
           select: {
@@ -159,40 +232,74 @@ export const getOwnerBusinesses = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // ⬇️ إرجاع object بدلاً من array
     res.json({
       ok: true,
       message: business ? "تم جلب العمل بنجاح" : "ليس لديك عمل مسجل",
-      data: business // ⬅️ object واحد وليس array
+      data: business
     });
   } catch (err: any) {
+    console.error("Error in getOwnerBusinesses:", err);
     res.status(500).json({ 
       ok: false,
       message: "حدث خطأ في جلب البيانات",
-      error: err.message 
+      ...(process.env.NODE_ENV === "development" && { error: err.message })
     });
   }
 };
 
 /* ============================
-   GET  BUSINESSE by id
+   GET BUSINESS BY ID
 ============================ */
-
-// API جديد لجلب عمل محدد بالـ ID
 export const getBusinessById = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const userId = (req as any).user.id;
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
+
+  const userId = user.id;
+  const businessId = parseInt(id);
+
+  if (isNaN(businessId)) {
+    return res.status(400).json({
+      ok: false,
+      message: "معرف العمل غير صالح"
+    });
+  }
 
   try {
     const business = await prisma.business.findFirst({
       where: { 
-        id: parseInt(id),
-        ownerId: userId // تأكد أن المستخدم هو المالك
+        id: businessId,
+        ownerId: userId
       },
       include: {
-        category: true,
-        media: true,
-        // ... باقي الـ includes
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true
+          }
+        },
+        media: {
+          orderBy: { order: 'asc' }
+        },
+        reviews: {
+          include: {
+            user: {
+              select: { 
+                id: true,
+                name: true, 
+                avatarUrl: true 
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        }
       }
     });
 
@@ -208,10 +315,11 @@ export const getBusinessById = async (req: Request, res: Response) => {
       data: business
     });
   } catch (err: any) {
+    console.error("Error in getBusinessById:", err);
     res.status(500).json({ 
       ok: false,
       message: "حدث خطأ في جلب البيانات",
-      error: err.message 
+      ...(process.env.NODE_ENV === "development" && { error: err.message })
     });
   }
 };
@@ -220,9 +328,25 @@ export const getBusinessById = async (req: Request, res: Response) => {
    UPDATE BUSINESS (OWNER ONLY)
 ============================ */
 export const updateBusiness = async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
+
+  const userId = user.id;
   const businessId = parseInt(req.params.id);
   const updateData = req.body;
+
+  if (isNaN(businessId)) {
+    return res.status(400).json({
+      ok: false,
+      message: "معرف العمل غير صالح"
+    });
+  }
 
   try {
     // التحقق من ملكية العمل
@@ -232,112 +356,200 @@ export const updateBusiness = async (req: Request, res: Response) => {
     });
 
     if (!existingBusiness) {
-      return res.status(404).json({ message: "Business not found or access denied" });
+      return res.status(404).json({ 
+        ok: false,
+        message: "العمل غير موجود أو ليس لديك صلاحية التعديل" 
+      });
     }
 
-    // توليد slug جديد إذا تغير الاسم
+    const updatedFields: any = {};
+
+    // تحديث الاسم و slug إذا تم تغييره
     if (updateData.name && updateData.name !== existingBusiness.name) {
-      updateData.slug = updateData.name.toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)+/g, '');
+      updatedFields.name = updateData.name.trim();
+      
+      // توليد slug جديد
+      const generateSlug = (text: string) =>
+        text
+          .toLowerCase()
+          .replace(/[^a-z0-9\u0600-\u06FF]+/g, '-')
+          .replace(/(^-|-$)+/g, '');
+      
+      let newSlug = generateSlug(updateData.name);
+      
+      // التحقق من أن slug فريد
+      const slugExists = await prisma.business.findFirst({
+        where: { 
+          slug: newSlug,
+          id: { not: businessId }
+        }
+      });
+      
+      if (slugExists) {
+        newSlug = `${newSlug}-${Date.now().toString().slice(-6)}`;
+      }
+      
+      updatedFields.slug = newSlug;
+    }
+
+    // تحديث الحقول الأخرى
+    if (updateData.description !== undefined) {
+      updatedFields.description = updateData.description?.trim() || null;
+    }
+    if (updateData.phone !== undefined) {
+      updatedFields.phone = updateData.phone?.trim() || null;
+    }
+    if (updateData.address !== undefined) {
+      updatedFields.address = updateData.address?.trim() || null;
+    }
+    if (updateData.city !== undefined) {
+      updatedFields.city = updateData.city?.trim() || null;
+    }
+    if (updateData.website !== undefined) {
+      updatedFields.website = updateData.website?.trim() || null;
+    }
+    if (updateData.openingHours !== undefined) {
+      try {
+        updatedFields.openingHours = typeof updateData.openingHours === "string" 
+          ? JSON.parse(updateData.openingHours) 
+          : updateData.openingHours;
+      } catch (error) {
+        return res.status(400).json({
+          ok: false,
+          message: "تنسيق أوقات العمل غير صالح"
+        });
+      }
+    }
+    if (updateData.categoryId !== undefined) {
+      const categoryId = parseInt(updateData.categoryId);
+      updatedFields.categoryId = isNaN(categoryId) ? null : categoryId;
     }
 
     // معالجة الصور المراد حذفها
-    // معالجة الصور المراد حذفها
-let removed = updateData.removeImages;
+    let removedImages: any = updateData.removeImages;
+    
+    if (removedImages) {
+      if (!Array.isArray(removedImages)) {
+        removedImages = [removedImages];
+      }
+      
+      const imageIds = removedImages.map((id: string) => parseInt(id)).filter(id => !isNaN(id));
+      
+      if (imageIds.length > 0) {
+        // جلب معلومات الصور لحذفها من Cloudinary
+        const mediasToDelete = await prisma.media.findMany({
+          where: {
+            id: { in: imageIds },
+            businessId
+          }
+        });
 
-// تأكد أنها مصفوفة
-if (removed && !Array.isArray(removed)) {
-  removed = [removed];
-}
+        // حذف من Cloudinary
+        const deletePromises = mediasToDelete
+          .filter(media => media.publicId)
+          .map(media => deleteFromCloudinary(media.publicId!));
+        
+        await Promise.allSettled(deletePromises);
 
-if (removed && removed.length > 0) {
-  // أولاً: احصل على publicId لكل صورة للحذف من Cloudinary إذا أردت
-  const medias = await prisma.media.findMany({
-    where: {
-      id: { in: removed.map((id: string | number) => parseInt(id)) },
-      businessId
+        // حذف من قاعدة البيانات
+        await prisma.media.deleteMany({
+          where: {
+            id: { in: imageIds },
+            businessId
+          }
+        });
+      }
     }
-  });
 
-  for (const media of medias) {
-    if (media.publicId) {
-      await deleteFromCloudinary(media.publicId); // دالة لحذف الصورة من Cloudinary
+    // رفع الصور الجديدة
+    const newImages: any[] = [];
+    let files: Express.Multer.File[] = [];
+
+    if (Array.isArray(req.files)) {
+      files = req.files as Express.Multer.File[];
+    } else if (req.files && (req.files as any).images) {
+      files = (req.files as any).images;
     }
-  }
 
-  // ثم حذف الصور من قاعدة البيانات
-  await prisma.media.deleteMany({
-    where: {
-      id: { in: removed.map((id: string | number) => parseInt(id)) },
-      businessId
+    if (files && files.length > 0) {
+      // إيجاد أعلى order حالي
+      const lastMedia = await prisma.media.findFirst({
+        where: { businessId },
+        orderBy: { order: 'desc' },
+        select: { order: true }
+      });
+      
+      let startOrder = lastMedia ? lastMedia.order + 1 : 0;
+
+      // رفع كل صورة
+      for (const file of files) {
+        try {
+          const result = await uploadToCloudinary(file);
+          newImages.push({
+            url: result.secure_url,
+            publicId: result.public_id,
+            type: file.mimetype.startsWith("image") ? "IMAGE" : 
+                  file.mimetype.startsWith("video") ? "VIDEO" : "DOCUMENT",
+            altText: `${updateData.name || existingBusiness.name} - صورة`,
+            title: file.originalname,
+            order: startOrder++,
+            businessId,
+            description: null,
+          });
+        } catch (uploadError) {
+          console.error("خطأ في رفع الصورة:", uploadError);
+        }
+      }
     }
-  });
-}
-
-    // معالجة الصور الجديدة
-
-  let newimages: any[]=[]
-  let files:Express.Multer.File[]=[]
-  if (Array.isArray(req.files)) {
-  files = req.files as Express.Multer.File[];
-}
-// إذا كان multer fields
-else if (req.files && (req.files as any).images) {
-  files = (req.files as any).images;
-}
-
-// رفع الصور
-for (const file of files) {
-  const result = await uploadToCloudinary(file);
-  newimages.push({
-    url: result.secure_url,
-    businessId
-  });
-}
 
     // تحديث العمل
     const business = await prisma.business.update({
       where: { id: businessId },
-      data: {
-        name: updateData.name,
-        slug: updateData.slug,
-        description: updateData.description,
-        phone: updateData.phone,
-        address: updateData.address,
-        city: updateData.city,
-        website: updateData.website,
-        openingHours: updateData.openingHours,
-         categoryId: updateData.categoryId ? parseInt(updateData.categoryId) : null,
-      },
-      include: { media: true }
+      data: updatedFields,
+      include: { 
+        media: {
+          orderBy: { order: 'asc' }
+        } 
+      }
     });
 
     // إضافة الصور الجديدة
-    if (newimages.length > 0) {
+    if (newImages.length > 0) {
       await prisma.media.createMany({
-        data: newimages
+        data: newImages
       });
     }
 
+    // جلب العمل مع جميع البيانات المحدثة
+    const updatedBusiness = await prisma.business.findUnique({
+      where: { id: businessId },
+      include: { 
+        media: {
+          orderBy: { order: 'asc' }
+        },
+        category: true
+      }
+    });
+
     res.json({ 
       ok: true,
-      message: "Business updated successfully", 
-      business 
+      message: "تم تحديث العمل بنجاح", 
+      data: updatedBusiness 
     });
   } catch (err: any) {
-    console.error(err);
+    console.error("Error in updateBusiness:", err);
     
     if (err.code === 'P2002') {
       return res.status(409).json({ 
         ok: false,
-        message: "Business slug already exists" 
+        message: "رابط العمل (slug) مستخدم بالفعل" 
       });
     }
     
     res.status(400).json({ 
       ok: false,
-      error: err.message 
+      message: "حدث خطأ أثناء التحديث",
+      ...(process.env.NODE_ENV === "development" && { error: err.message })
     });
   }
 };
@@ -346,72 +558,152 @@ for (const file of files) {
    GET BUSINESS STATS (OWNER ONLY)
 ============================ */
 export const getBusinessStats = async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
+
+  const userId = user.id;
   const businessId = parseInt(req.params.id);
 
+  if (isNaN(businessId)) {
+    return res.status(400).json({
+      ok: false,
+      message: "معرف العمل غير صالح"
+    });
+  }
+
   try {
-    // Verify business ownership
+    // التحقق من ملكية العمل
     const business = await prisma.business.findFirst({
       where: { id: businessId, ownerId: userId }
     });
 
     if (!business) {
-      return res.status(404).json({ message: "Business not found or access denied" });
+      return res.status(404).json({ 
+        ok: false,
+        message: "العمل غير موجود أو ليس لديك صلاحية الوصول" 
+      });
     }
 
-    const stats = await prisma.businessStats.findMany({
-      where: { businessId },
-      orderBy: { date: 'desc' },
-      take: 30 // Last 30 days
-    });
+    const [stats, reviews, favoritesCount, followsCount] = await Promise.all([
+      // الإحصائيات
+      prisma.businessStats.findMany({
+        where: { businessId },
+        orderBy: { date: 'desc' },
+        take: 30
+      }),
+      
+      // التقييمات
+      prisma.review.findMany({
+        where: { businessId },
+        include: {
+          user: {
+            select: { 
+              id: true,
+              name: true, 
+              avatarUrl: true 
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      
+      // عدد المفضلات
+      prisma.favorite.count({
+        where: { businessId }
+      }),
+      
+      // عدد المتابعين
+      prisma.follow.count({
+        where: { businessId }
+      })
+    ]);
 
-    const reviews = await prisma.review.findMany({
-      where: { businessId },
-      include: {
-        user: {
-          select: { name: true, avatarUrl: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const favoritesCount = await prisma.favorite.count({
-      where: { businessId }
-    });
-
-    const followsCount = await prisma.follow.count({
-      where: { businessId }
-    });
+    // حساب متوسط التقييم
+    const averageRating = reviews.length > 0 
+      ? reviews.reduce((acc, review) => acc + review.rating, 0) / reviews.length 
+      : 0;
 
     res.json({
-      ok:true,
+      ok: true,
       message: "تم جلب الإحصائيات بنجاح",
-      data:{
-      business,
-      stats,
-      reviews,
-      favoritesCount,
-      followsCount,
-      totalReviews: reviews.length,
-      averageRating: reviews.length > 0 ? 
-      reviews.reduce((acc, review) => acc + review.rating, 0) / reviews.length : 0
+      data: {
+        business,
+        stats,
+        reviews,
+        favoritesCount,
+        followsCount,
+        totalReviews: reviews.length,
+        averageRating: parseFloat(averageRating.toFixed(1))
       }
-     
     });
 
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("Error in getBusinessStats:", err);
+    res.status(500).json({ 
+      ok: false,
+      message: "حدث خطأ في جلب الإحصائيات",
+      ...(process.env.NODE_ENV === "development" && { error: err.message })
+    });
   }
 };
 
-/**============================= */
-
+/* ============================
+   DELETE BUSINESS
+============================ */
 export const deleteBusiness = async (req: Request, res: Response) => {
-  try {
-    const businessId = parseInt(req.params.id);
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
 
+  const userId = user.id;
+  const businessId = parseInt(req.params.id);
+
+  if (isNaN(businessId)) {
+    return res.status(400).json({
+      ok: false,
+      message: "معرف العمل غير صالح"
+    });
+  }
+
+  try {
+    // التحقق من ملكية العمل
+    const business = await prisma.business.findFirst({
+      where: { 
+        id: businessId, 
+        ownerId: userId 
+      },
+      include: { media: true }
+    });
+
+    if (!business) {
+      return res.status(404).json({
+        ok: false,
+        message: "العمل غير موجود أو ليس لديك صلاحية الحذف"
+      });
+    }
+
+    // حذف الصور من Cloudinary أولاً
+    const mediaWithPublicIds = business.media.filter(media => media.publicId);
+    if (mediaWithPublicIds.length > 0) {
+      const deletePromises = mediaWithPublicIds.map(media => 
+        deleteFromCloudinary(media.publicId!)
+      );
+      await Promise.allSettled(deletePromises);
+    }
 
     const result = await prisma.$transaction(async (tx) => {
+      // حذف جميع البيانات المرتبطة
       await tx.media.deleteMany({ where: { businessId } });
       await tx.event.deleteMany({ where: { businessId } });
       await tx.review.deleteMany({ where: { businessId } });
@@ -422,6 +714,7 @@ export const deleteBusiness = async (req: Request, res: Response) => {
       await tx.follow.deleteMany({ where: { businessId } });
       await tx.job.deleteMany({ where: { businessId } });
 
+      // حذف العمل نفسه
       const deletedBusiness = await tx.business.delete({
         where: { id: businessId }
       });
@@ -430,9 +723,13 @@ export const deleteBusiness = async (req: Request, res: Response) => {
     });
 
     res.status(200).json({
-      success: true,
+      ok: true,
       message: "تم حذف العمل بنجاح",
-      data: { id: result.id, name: result.name }
+      data: { 
+        id: result.id, 
+        name: result.name,
+        deletedAt: new Date().toISOString()
+      }
     });
 
   } catch (error: any) {
@@ -440,14 +737,15 @@ export const deleteBusiness = async (req: Request, res: Response) => {
     
     if (error.code === 'P2025') {
       return res.status(404).json({
-        success: false,
+        ok: false,
         message: "العمل غير موجود"
       });
     }
     
     res.status(500).json({
-      success: false,
-      message: "حدث خطأ أثناء حذف العمل"
+      ok: false,
+      message: "حدث خطأ أثناء حذف العمل",
+      ...(process.env.NODE_ENV === "development" && { error: error.message })
     });
   }
 };
@@ -456,7 +754,16 @@ export const deleteBusiness = async (req: Request, res: Response) => {
    CHECK IF USER HAS BUSINESS
 ============================ */
 export const checkUserBusiness = async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const user = (req as AuthenticatedRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({
+      ok: false,
+      message: "يجب تسجيل الدخول أولاً"
+    });
+  }
+
+  const userId = user.id;
 
   try {
     const business = await prisma.business.findFirst({
@@ -466,7 +773,8 @@ export const checkUserBusiness = async (req: Request, res: Response) => {
         name: true,
         slug: true,
         status: true,
-        createdAt: true
+        createdAt: true,
+        logo: true
       }
     });
 
@@ -476,10 +784,24 @@ export const checkUserBusiness = async (req: Request, res: Response) => {
       data: business
     });
   } catch (err: any) {
+    console.error("Error in checkUserBusiness:", err);
     res.status(500).json({ 
       ok: false,
       message: "حدث خطأ في التحقق",
-      error: err.message 
+      ...(process.env.NODE_ENV === "development" && { error: err.message })
     });
   }
 };
+
+// التصدير ككائن واحد
+export const businessController = {
+  createBusiness,
+  getOwnerBusinesses,
+  getBusinessById,
+  updateBusiness,
+  getBusinessStats,
+  deleteBusiness,
+  checkUserBusiness
+};
+
+export default businessController;
