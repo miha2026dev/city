@@ -36,6 +36,9 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ====== ERROR HANDLER ======
 app.use(errorHandler);
+app.get('/', (req, res) => {
+  res.send('API is running!');
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

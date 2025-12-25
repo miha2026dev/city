@@ -209,7 +209,7 @@ export default function NewBusinessForm() {
                 value={formData.tags}
                 onChange={handleChange}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                placeholderوسوم مفصولة بفواصل (مطعم، وجبات سريعة، دليفري)"
+                placeholder="مثال: مطعم, توصيل, بيتزا"
               />
               <p className="text-xs text-gray-500 mt-1">استخدم فواصل لفصل الوسوم المختلفة</p>
             </div>
