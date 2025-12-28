@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import logo from '@/public/logo.png'
-import { Menu, X, User, LogIn, Settings, icons, Tag } from "lucide-react"; // أضفت Settings
+import { Menu, X, User, LogIn, Settings, icons, Tag, User2Icon } from "lucide-react"; // أضفت Settings
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSelector } from 'react-redux';
@@ -167,15 +167,27 @@ export default function Header() {
           </nav>
 
           {/* زر القائمة - الجوال */}
-          <div className="md:hidden flex items-center space-x-3">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setOpen(true)}
-              className="p-2 bg-white/10 rounded-lg"
-              aria-label="فتح القائمة"
+          <div className='flex items-center justify-center '>
+            <div className="md:hidden flex items-center space-x-3">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setOpen(true)}
+                className="p-2 bg-white/10 rounded-lg"
+                aria-label="فتح القائمة"
+              >
+                <Menu className="w-6 h-6 text-white" />
+              </motion.button>
+            </div>
+            {/* زر الدخول */}
+           <div className='md:hidden flex items-center space-x-3 '>
+             <Link
+              href="/Login"
+              onClick={() => setOpen(false)}
+              className="absolute ml-7  left-7 p-2 rounded-xl hover:bg-red-500/20 transition-all duration-200 z-50"
             >
-              <Menu className="w-6 h-6 text-white" />
-            </motion.button>
+              <User2Icon className="w-6 h-6" />
+            </Link>
+           </div>
           </div>
         </div>
 
@@ -264,18 +276,6 @@ export default function Header() {
                     </motion.div>
                   )}
                 </nav>
-
-                {/* قسم المستخدم */}
-                <div className="border-t border-white/10 pt-6 mt-auto relative z-10">
-                  <Link
-                    href="/Login"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center space-x-3 p-3 bg-gradient-to-r from-yellow-400 to-yellow-500 text-slate-900 rounded-xl font-bold hover:from-yellow-300 hover:to-yellow-400 transition-all justify-center"
-                  >
-                    <LogIn className="w-5 h-5" />
-                    <span>تسجيل الدخول</span>
-                  </Link>
-                </div>
               </motion.div>
             </>
           )}
