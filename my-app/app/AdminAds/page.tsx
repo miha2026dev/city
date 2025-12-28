@@ -69,7 +69,14 @@ interface StoreUser {
 
 export default function AdminAds() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+const [statusParam, setStatusParam] = useState<string | null>(null);
+
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  setStatusParam(params.get("status"));
+}, []);
+
+
   const [loading, setLoading] = useState(true);
   const user = useSelector((state: RootState) => state.user.user) as StoreUser | null;
   const [search, setSearch] = useState("");
@@ -90,7 +97,7 @@ export default function AdminAds() {
   const fetchAds = async () => {
     try {
       setLoading(true);
-      const status = searchParams.get("status") || filterStatus;
+      const status = statusParam || filterStatus;
       const bannerType = filterBannerType !== "all" ? filterBannerType : undefined;
       const searchQuery = search || undefined;
 

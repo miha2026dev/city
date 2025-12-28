@@ -40,10 +40,29 @@ interface Business {
   id: number;
   name: string;
 }
+interface Ad {
+  id: number;
+  title: string;
+  content: string;
+  bannerType: string;
+  startAt: string;
+  endAt: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  url?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  imageUrl?: string;
+  mobileImageUrl?: string;
+  tabletImageUrl?: string;
+  status?: string;
+  rejectionReason?: string;
+}
+
 
 export default function EditAdPage() {
   const router = useRouter();
-  const params = useParams();
+  const params = useParams<{id:string}>();
   const id = params.id;
   
   const user = useSelector((state: RootState) => state.user.user) as StoreUser | null;
@@ -83,7 +102,7 @@ export default function EditAdPage() {
   });
   
   const [token, setToken] = useState<string | null>(null);
-  const [adData, setAdData] = useState<any>(null);
+  const [adData, setAdData] = useState<Ad | null>(null);
 
   useEffect(() => {
     setIsClient(true);
@@ -221,20 +240,17 @@ export default function EditAdPage() {
       if (newImages.image) formDataToSend.append("image", newImages.image);
       if (newImages.mobileImage) formDataToSend.append("mobileImage", newImages.mobileImage);
       if (newImages.tabletImage) formDataToSend.append("tabletImage", newImages.tabletImage);
-
-      const res = await Axios({
+      const res= await Axios({
         ...SummaryApi.ad.update_ad,
-        url: `${SummaryApi.ad.update_ad.url}/${id}`,
-        method: "PUT",
         data: formDataToSend,
-        headers: {
+        headers:{
           Authorization: `Bearer ${token}`,
-        },
-      });
+        }
+      })
 
       if (res.data.ok) {
         toast.success("تم تحديث الإعلان بنجاح وتم إرساله للمراجعة");
-        router.push("/owner/ads");
+        router.push("/OwnerAds");
       } else {
         toast.error(res.data.message || "حدث خطأ أثناء تحديث الإعلان");
       }

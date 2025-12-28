@@ -15,35 +15,39 @@ export default function Login() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const user = useSelector((state: RootState) => state.user.user);
-  const handleSubmit = async (e) => {
+ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
 
-  const username = e.target.username.value;
-  const password = e.target.password.value;
+  const form = e.currentTarget;
 
-try {
-  const response = await Axios({
-    ...SummaryApi.user.login,
-    data: { username, password } 
-  })
-  localStorage.setItem("accessToken",response.data.accessToken);
-  localStorage.setItem("refreshToken",response.data.refreshToken);
-  
-   
-  dispatch(setCredentials({
-    user:{
-    ...response.data.user,
-    accessToken: response.data.accessToken,
-    }
-  }))
-   e.target.username.value = "";
-    e.target.password.value = "";
-  router.push("/")
-  console.log("تم التسجيل:", response.data);
-} catch (err) {
-  console.error("خطأ:", err.response?.data || err.message);
-}
+  const username = (form.elements.namedItem("username") as HTMLInputElement).value;
+  const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+
+  try {
+    const response = await Axios({
+      ...SummaryApi.user.login,
+      data: { username, password },
+    });
+
+    localStorage.setItem("accessToken", response.data.accessToken);
+    localStorage.setItem("refreshToken", response.data.refreshToken);
+
+    dispatch(
+      setCredentials({
+        user: {
+          ...response.data.user,
+          accessToken: response.data.accessToken,
+        },
+      })
+    );
+
+    form.reset();
+    router.push("/");
+  } catch (err: any) {
+    console.error("خطأ:", err.response?.data || err.message);
+  }
 };
+
 
  
 

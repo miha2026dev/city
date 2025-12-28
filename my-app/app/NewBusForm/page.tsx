@@ -34,7 +34,7 @@ export default function NewBusinessForm() {
 
     try {
       const response = await Axios({
-        ...SummaryApi.owner.createBusiness,
+        ...SummaryApi.owner.create_bus,
         data: formData,
         headers: { Authorization: `Bearer ${user?.accessToken}` },
       });

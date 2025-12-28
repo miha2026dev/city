@@ -47,7 +47,7 @@ Axios.interceptors.response.use(
 
 
 // ========== REFRESH TOKEN FUNCTION ==========
-const refreshAccessToken = async (refreshToken) => {
+const refreshAccessToken = async (refreshToken:string) => {
   try {
     const response = await Axios({
       ...SummaryApi.user.refreshToken,

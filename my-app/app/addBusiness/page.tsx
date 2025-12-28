@@ -176,6 +176,7 @@ const GENERAL_REGIONS = [
 export default function AddBusiness() {
   const router = useRouter();
   const user = useSelector((state: RootState) => state.user.user);
+  
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("basic");
   const [images, setImages] = useState<ImageFile[]>([]);
@@ -326,7 +327,10 @@ const handleSubmit = async (e: React.FormEvent) => {
 
   try {
     const submitFormData = new FormData();
-
+    if (!user) {
+      toast.error("يجب تسجيل الدخول أولاً");
+      return
+    }
     // إرسال الحقول كما يتوقع الباك اند تماماً
     submitFormData.append("ownerId", user.id.toString());
     submitFormData.append("name", formData.name.trim());

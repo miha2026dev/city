@@ -13,7 +13,17 @@ import {
   Trash2, Upload, Calendar, Tag,
   Phone, Map, Globe as GlobeIcon
 } from "lucide-react";
-
+interface Media {
+  id: number;
+  url: string;
+  publicId?: string;
+  type: "IMAGE" | "VIDEO"; // أو أي MediaType تستخدمه
+  altText?: string;
+  title?: string;
+  description?: string;
+  order: number;
+  businessId?: number;
+}
 interface Business {
   id: number;
   name: string;
@@ -25,8 +35,17 @@ interface Business {
   openingHours?: Record<string, any>;
   categoryId?: number;
   category?: { id: number; name: string };
-  media?: Array<{ id: number; url: string; type: string }>;
+  media?: Media[];
 }
+interface HoursRange {
+  open?: string;
+  close?: string;
+  closed?: boolean;
+}
+
+
+
+
 
 interface Category {
   id: number;
@@ -58,7 +77,7 @@ export default function EditBusinessPage() {
   
   const [openingHours, setOpeningHours] = useState<Record<string, any>>({});
   const [hoursText, setHoursText] = useState("");
-  
+
   const [images, setImages] = useState<{
     existing: Array<{ id: number; url: string; type: string }>;
     new: File[];
@@ -147,12 +166,13 @@ export default function EditBusinessPage() {
           if (typeof hours === 'string') {
             return `${dayName}: ${hours}`;
           } else if (hours && typeof hours === 'object') {
-            if (hours.closed) {
+            const h = hours as HoursRange
+          if (h.closed) {
               return `${dayName}: مغلق`;
-            } else if (hours.open && hours.close) {
-              return `${dayName}: ${hours.open} - ${hours.close}`;
-            } else if (hours.open || hours.close) {
-              return `${dayName}: ${hours.open || ''}${hours.open && hours.close ? ' - ' : ''}${hours.close || ''}`;
+            } else if (h.open && h.close) {
+              return `${dayName}: ${h.open} - ${h.close}`;
+            } else if (h.open || h.close) {
+              return `${dayName}: ${h.open || ''}${h.open && h.close ? ' - ' : ''}${h.close || ''}`;
             }
           }
           return `${dayName}: غير محدد`;
@@ -169,7 +189,7 @@ export default function EditBusinessPage() {
       }));
       
       // إنشاء معاينات للصور الحالية
-      const previews = existingMedia.map(media => ({
+      const previews = existingMedia.map((media: Media) => ({
         url: media.url,
         type: 'existing' as const,
         id: media.id
@@ -187,7 +207,7 @@ export default function EditBusinessPage() {
         setCategories(allCats);
         
         // تصفية فقط التصنيفات الرئيسية (بدون تصنيفات فرعية)
-        const mainCategories = allCats.filter(cat => cat.parentId === null);
+        const mainCategories = allCats.filter((cat: Category) => cat.parentId === null);
         setFilteredCategories(mainCategories);
       } else {
         setCategories([]);

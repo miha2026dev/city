@@ -22,22 +22,46 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import EditProfilePage from "../component/UserEditProfilePage";
+import EditProfilePage from "../UserProfileEdit/page";
 import Link from "next/link";
 import { clearSession } from "../store/userSlice";
+import toast from "react-hot-toast";
+type ReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+interface Review {
+  id: number;
+  businessId: number;
+  userId: number;
+  rating: number;
+  title?: string;
+  comment?: string;
+  status: ReviewStatus;
+  isVerified: boolean;
+  helpful: number;
+  createdAt: string;
+  updatedAt: string;
+  business?: {
+    id: number;
+    name: string;
+    slug: string;
+  };
+}
+
 interface UserData {
   id: number;
   username: string;
   name?: string;
   phone?: string;
   role: "USER";
+  isActive: boolean;
   avatarUrl?: string;
+  lastLogin?: string;
   bio?: string;
   createdAt: string;
+  reviews?: Review[];
   favorites?: { business: { id: number; name: string; slug: string } }[];
   bookmarks?: { business: { id: number; name: string; slug: string } }[];
   notifications?: { id: number; title: string; message: string; isRead: boolean; sentAt: string }[];
-  // تم إزالة ownedBusinesses لأن المستخدم العادي لا يملك أعمالاً
 }
 
 interface StoreUser {
@@ -56,26 +80,26 @@ export default function ProfilePage() {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    /* if (!user) {
-      router.push("/Login");
-      return;
-    } */
-
     const fetchUserData = async () => {
       try {
         setLoading(true);
+         if (!user || !user.accessToken) {
+        toast.error("يرجى تسجيل الدخول أولاً");
+         setLoading(false);
+         return
+         }
         const response = await Axios({
           ...SummaryApi.user.getUserById(user.id),
           headers: { Authorization: `Bearer ${user.accessToken}` },
         });
 
         setUserData(response.data.data);
-      } catch (err: any) {
+      
+    }catch (err: any) {
         console.error("Error fetching user data:", err.response?.data || err.message);
       } finally {
         setLoading(false);
-      }
-    };
+      }}
 
     fetchUserData();
   }, [user, router]);
@@ -493,7 +517,7 @@ const handleLogout = () => {
                         className="p-3 rounded-xl bg-gray-50 border border-gray-200"
                       >
                         <p className="font-medium text-gray-900">
-                          {review.business.name}
+                          {review.business?.name || "-"}
                         </p>
                         <p className="text-sm text-gray-600">
                           {review.comment}

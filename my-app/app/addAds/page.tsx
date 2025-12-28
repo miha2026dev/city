@@ -66,7 +66,7 @@ const initialImages = {
   tabletImage: null as File | null
 };
   // حالة النموذج
-  const [formData, setFormData] = useState({initialFormData});
+  const [formData, setFormData] = useState<typeof initialFormData>(initialFormData);
   const [images, setImages] = useState(initialImages);
   
   const [businesses, setBusinesses] = useState<Business[]>([]);

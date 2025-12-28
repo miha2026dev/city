@@ -33,7 +33,7 @@ import { clearSession } from "../store/userSlice";
   username: string;
   name?: string;
   phone?: string;
-  role: "ADMIN";
+  role: "ADMIN" |"OWNER" | "USER";
   avatarUrl?: string;
   createdAt: string;
   isActive:boolean;
@@ -47,6 +47,20 @@ interface StoreUser {
   role: "ADMIN";
   accessToken: string;
 }
+interface Category {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+  imageUrl: string | null;
+  parentId: number | null;
+  sortOrder: number;
+  isActive: boolean;
+  children?: Category[];
+  _count?: {
+    businesses: number;
+  };
+}
 
 export default function Admin() {
  const router = useRouter();
@@ -57,6 +71,7 @@ export default function Admin() {
   const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
   const [usersData, setUsersData] = useState<UsersData[]>([]); // ⬅️ غيرت إلى مصفوفة
  const [activeUsers, setActiveUsers] = useState<any[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
  const dispatch=useDispatch()
  const handleLogout = () => {
    try {
@@ -77,6 +92,29 @@ export default function Admin() {
      console.error("Logout error:", err);
    }
  };
+ 
+  // جلب التصنيفات
+  const fetchCategories = async () => {
+    try {
+      setLoading(true);
+      const response=await Axios({
+        ...SummaryApi.category.get_categories
+      })
+      if (response.data.success) {
+        setCategories(response.data.data);
+      }
+    } catch (error) {
+      console.error('خطأ في جلب التصنيفات:', error);
+      toast.error('فشل في جلب التصنيفات');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -314,7 +352,7 @@ const fetchActiveUsers = async () => {
 
             {
               label: "التصنيفات",
-              value: stats.categories || 0,
+              value: categories.length || 0,
               icon: Layers,
               color: "purple",
               onClick: () => router.push("/AdminCategories"),

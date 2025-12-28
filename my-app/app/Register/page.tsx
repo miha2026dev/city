@@ -14,35 +14,36 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
- const handleSubmit = async (e) => {
+const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
-  const username = e.target.username.value;
-  const password = e.target.password.value;
-  const name = e.target.name.value;
-  const phone = e.target.phone.value;
+
+  const formData = new FormData(e.currentTarget); // safer in TS
+  const username = formData.get("username") as string;
+  const password = formData.get("password") as string;
+  const name = formData.get("name") as string;
+  const phone = formData.get("phone") as string;
 
   try {
     const response = await Axios({
       ...SummaryApi.user.register,
       data: { username, password, name, phone },
     });
-
-    console.log("تم إنشاء الحساب:", response.data);
-    toast.success("تم إنشاء الحساب بنجاح!");
+    if(response.data.ok){
+       toast.success("تم إنشاء الحساب بنجاح!");
+    }
+   
 
     // مسح الحقول
-    e.target.username.value = "";
-    e.target.password.value = "";
-    e.target.name.value = "";
-    e.target.phone.value = "";
+    e.currentTarget.reset();
 
     // التوجيه للصفحة
-    router.push("/Login"); // إذا تستخدم Next.js useRouter
-  } catch (err) {
+    router.push("/Login");
+  } catch (err: any) {
     console.error("خطأ:", err.response?.data || err.message);
     toast.error(err.response?.data?.message || "حدث خطأ أثناء التسجيل");
   }
 };
+
 
 
   return (

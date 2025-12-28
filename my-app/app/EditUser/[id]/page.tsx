@@ -20,13 +20,31 @@ import {
 } from "lucide-react";
 import SummaryApi from "@/app/common/SummaryApi";
 
+interface UserForm {
+  id?: string;
+  username: string;
+  name: string;
+  phone: string;
+  role: "admin" | "user";
+  password: string;
+  createdAt: string;
+}
+
 export default function EditUser() {
   const router = useRouter();
   const { id } = useParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [form, setForm] = useState<any>(null);
+  const [form, setForm] = useState<UserForm>({
+  username: "",
+  name: "",
+  phone: "",
+  role: "user",
+  password: "",
+  createdAt: ""
+});
+
   const [originalData, setOriginalData] = useState<any>(null);
 
 const fetchUser = async () => {
@@ -168,11 +186,11 @@ const fetchUser = async () => {
                 <h1 className="text-4xl font-bold bg-gradient-to-r from-green-900 to-emerald-700 bg-clip-text text-transparent">
                   تعديل بيانات المستخدم
                 </h1>
-                <div className="flex items-center gap-4 mt-2">
+                {/* <div className="flex items-center gap-4 mt-2">
                   <p className="text-gray-600">ID: <span className="font-mono bg-gray-100 px-2 py-1 rounded-lg">#{form.id}</span></p>
                   <p className="text-gray-600">•</p>
                   <p className="text-gray-600">أنشئ في: {new Date(form.createdAt).toLocaleDateString('ar-SA')}</p>
-                </div>
+                </div> */}
               </div>
             </div>
 

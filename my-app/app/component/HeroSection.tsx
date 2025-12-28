@@ -24,7 +24,7 @@ export default function HeroWithBanner() {
   const [isLoading, setIsLoading] = useState(true);
 
   // جلب البيانات من API
-  useEffect(() => {
+   useEffect(() => {
     const fetchBanners = async () => {
       try {
         const response = await fetch('/api/banners?type=MAIN_HERO');
@@ -38,10 +38,10 @@ export default function HeroWithBanner() {
     };
 
     fetchBanners();
-  }, []);
+  }, []); 
 
   // التبديل التلقائي
-  useEffect(() => {
+ useEffect(() => {
     if (banners.length <= 1) return;
 
     const interval = setInterval(() => {
@@ -49,15 +49,15 @@ export default function HeroWithBanner() {
     }, 5000); // كل 5 ثواني
 
     return () => clearInterval(interval);
-  }, [banners.length]);
+  }, [banners.length]); 
 
-  const nextBanner = () => {
+ /*  const nextBanner = () => {
     setCurrentBanner((prev) => (prev + 1) % banners.length);
-  };
+  }; */
 
-  const prevBanner = () => {
+ /*  const prevBanner = () => {
     setCurrentBanner((prev) => (prev - 1 + banners.length) % banners.length);
-  };
+  }; */
 
   if (isLoading) {
     return <div className="h-96 bg-gray-200 animate-pulse"></div>;
@@ -88,10 +88,10 @@ export default function HeroWithBanner() {
               media="(max-width: 768px)" 
               srcSet={banners[currentBanner].mobileImageUrl || banners[currentBanner].imageUrl} 
             />
-            <source 
+           {/*  <source 
               media="(min-width: 769px) and (max-width: 1024px)" 
               srcSet={banners[currentBanner].tabletImageUrl || banners[currentBanner].imageUrl} 
-            />
+            /> */}
             <img
               src={banners[currentBanner].imageUrl}
               alt={banners[currentBanner].title}
@@ -132,13 +132,13 @@ export default function HeroWithBanner() {
           {banners.length > 1 && (
             <>
               <button
-                onClick={prevBanner}
+               /*  onClick={prevBanner} */
                 className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors"
               >
                 <ChevronLeft className="w-6 h-6 text-white" />
               </button>
               <button
-                onClick={nextBanner}
+               /*  onClick={nextBanner} */
                 className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors"
               >
                 <ChevronRight className="w-6 h-6 text-white" />
