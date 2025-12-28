@@ -15,9 +15,20 @@ dotenv.config();
 const app = express();
 
 // ====== MIDDLEWARES ======
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://city6.vercel.app",
+];
+
 app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
 }));
 app.use(morgan('dev'));
 app.use(express.json());
