@@ -17,7 +17,7 @@ const app = express();
 // ====== MIDDLEWARES ======
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://city6.vercel.app",
+  "https://city78.vercel.app",
 ];
 
 app.use(cors({
